@@ -1,1 +1,0 @@
-# Word-Impostor-Game-in-Albanian
