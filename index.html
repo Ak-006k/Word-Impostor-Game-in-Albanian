@@ -1,220 +1,186 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
-		<title>Impostor Game</title>
-		<style>
-html, body, #canvas {
-	margin: 0;
-	padding: 0;
-	border: 0;
-}
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Impostor Game</title>
 
-body {
-	color: white;
-	background-color: black;
-	overflow: hidden;
-	touch-action: none;
-}
+  <style>
+    /* make the page and canvas fill the whole viewport */
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+    }
 
-#canvas {
-	display: block;
-}
+    #canvas-container {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: black;
+    }
 
-#canvas:focus {
-	outline: none;
-}
+    canvas {
+      /* let canvas scale to viewport but keep aspect */
+      max-width: 100%;
+      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
 
-#status, #status-splash, #status-progress {
-	position: absolute;
-	left: 0;
-	right: 0;
-}
+    /* mobile text input overlay (hidden by default) */
+    #mobile-text {
+      position: fixed;
+      left: 6px;
+      right: 6px;
+      bottom: 6px;
+      height: 44px;
+      font-size: 18px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+      color: white;
+      outline: none;
+      display: none; /* we show it on touch devices when needed */
+      z-index: 9999;
+    }
 
-#status, #status-splash {
-	top: 0;
-	bottom: 0;
-}
+    /* show the mobile input when the class is on the body */
+    body.show-mobile-input #mobile-text {
+      display: block;
+    }
 
-#status {
-	background-color: #242424;
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
-	align-items: center;
-	visibility: hidden;
-}
+    /* small helper to keep the canvas centered on desktop if aspect differs */
+    #game-aspect {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <!-- The engine's canvas will be created/attached somewhere here.
+         If your original index.html already creates a canvas with id "canvas",
+         the engine will use that. If not, the engine will insert one. -->
+    <div id="game-aspect"></div>
+  </div>
 
-#status-splash {
-	max-height: 100%;
-	max-width: 100%;
-	margin: auto;
-}
+  <!-- Hidden mobile input used only to summon the keyboard and capture typing -->
+  <input id="mobile-text" type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" />
 
-#status-splash.show-image--false {
-	display: none;
-}
+  <!-- --- Insert Godot JS loader script lines that your export produced --- -->
+  <!-- Example: (KEEP your existing script tags here: godot.js, etc.) -->
+  <script src="Albanian Impostor Game AK.js"></script>
+  <!-- If you have wasm br/gz files, keep those in the folder too. -->
+  <!-- ------------------------------------------------------------------ -->
 
-#status-splash.fullsize--true {
-	height: 100%;
-	width: 100%;
-	object-fit: contain;
-}
+  <script>
+    // --- Auto-resize routine for the Canvas ---
+    function resizeCanvas() {
+      // Find the canvas created by Godot. Many exports name it "canvas"
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return;
 
-#status-splash.use-filter--false {
-	image-rendering: pixelated;
-}
+      // Set CSS size to fill container (we already set this via CSS)
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
 
-#status-progress, #status-notice {
-	display: none;
-}
+      // Adjust pixel ratio so the engine renders crisply.
+      const deviceRatio = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(canvas.clientWidth * deviceRatio);
+      canvas.height = Math.floor(canvas.clientHeight * deviceRatio);
+    }
 
-#status-progress {
-	bottom: 10%;
-	width: 50%;
-	margin: 0 auto;
-}
+    // Call resize after the engine creates the canvas
+    function waitForCanvasAndResize(fn) {
+      const observer = new MutationObserver((mutations, obs) => {
+        if (document.querySelector('canvas')) {
+          obs.disconnect();
+          fn();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
 
-#status-notice {
-	background-color: #5b3943;
-	border-radius: 0.5rem;
-	border: 1px solid #9b3943;
-	color: #e0e0e0;
-	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
-	line-height: 1.3;
-	margin: 0 2rem;
-	overflow: hidden;
-	padding: 1rem;
-	text-align: center;
-	z-index: 1;
-}
-		</style>
-		<link id="-gd-engine-icon" rel="icon" type="image/png" href="Albanian Impostor Game AK.icon.png" />
-<link rel="apple-touch-icon" href="Albanian Impostor Game AK.apple-touch-icon.png"/>
+    // --- Mobile input overlay + forwarding characters as keyboard events ---
+    (function() {
+      const mobileInput = document.getElementById('mobile-text');
+      const container = document.getElementById('canvas-container');
 
-	</head>
-	<body>
-		<canvas id="canvas">
-			Your browser does not support the canvas tag.
-		</canvas>
+      // When user touches the canvas area, enable and focus the mobile input to bring up keyboard
+      function onCanvasTap(ev) {
+        // only show on narrow screens (heuristic for phones)
+        if (window.innerWidth > 900) return; // desktop skip
+        document.body.classList.add('show-mobile-input');
+        mobileInput.value = '';
+        mobileInput.focus({preventScroll:true});
+      }
 
-		<noscript>
-			Your browser does not support JavaScript.
-		</noscript>
+      // Forward characters typed in the HTML input to the page as KeyboardEvents
+      function forwardTextAsKeys(text) {
+        // For simplicity, send each character as keydown then keyup.
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          // create keydown
+          const kd = new KeyboardEvent('keydown', {key: ch, char: ch, bubbles: true});
+          window.dispatchEvent(kd);
+          // create keypress (older consumers)
+          try {
+            const kp = new KeyboardEvent('keypress', {key: ch, char: ch, bubbles: true});
+            window.dispatchEvent(kp);
+          } catch(e){}
+          // create keyup
+          const ku = new KeyboardEvent('keyup', {key: ch, char: ch, bubbles: true});
+          window.dispatchEvent(ku);
+        }
+      }
 
-		<div id="status">
-			<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="Albanian Impostor Game AK.png" alt="">
-			<progress id="status-progress"></progress>
-			<div id="status-notice"></div>
-		</div>
+      // On input, forward only the new chars (this simple approach sends whole value; fine for typing)
+      mobileInput.addEventListener('input', (e) => {
+        const v = mobileInput.value || '';
+        if (v.length > 0) {
+          forwardTextAsKeys(v);
+          // clear after sending so next input only contains new keystrokes
+          mobileInput.value = '';
+        }
+      });
 
-		<script src="Albanian Impostor Game AK.js"></script>
-		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"Albanian Impostor Game AK","experimentalVK":false,"fileSizes":{"Albanian Impostor Game AK.pck":15124,"Albanian Impostor Game AK.wasm":36145869},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
-const GODOT_THREADS_ENABLED = false;
-const engine = new Engine(GODOT_CONFIG);
+      // Hide the mobile input if user taps outside or presses escape
+      window.addEventListener('touchstart', (e) => {
+        // if user taps outside the input, don't force keyboard forever
+        if (!mobileInput.contains(e.target)) {
+          // keep keyboard if they tap the canvas again; otherwise hide after short delay
+          setTimeout(() => {
+            document.body.classList.remove('show-mobile-input');
+            try { mobileInput.blur(); } catch(e){}
+          }, 2500);
+        }
+      }, {passive:true});
 
-(function () {
-	const statusOverlay = document.getElementById('status');
-	const statusProgress = document.getElementById('status-progress');
-	const statusNotice = document.getElementById('status-notice');
+      // Attach tap handler to container (so tapping the canvas opens the input)
+      container.addEventListener('touchstart', onCanvasTap, {passive:true});
+      container.addEventListener('click', onCanvasTap);
 
-	let initializing = true;
-	let statusMode = '';
+      // Also do a normal resize when the canvas is created
+      waitForCanvasAndResize(() => {
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+      });
+    })();
 
-	function setStatusMode(mode) {
-		if (statusMode === mode || !initializing) {
-			return;
-		}
-		if (mode === 'hidden') {
-			statusOverlay.remove();
-			initializing = false;
-			return;
-		}
-		statusOverlay.style.visibility = 'visible';
-		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
-		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
-		statusMode = mode;
-	}
-
-	function setStatusNotice(text) {
-		while (statusNotice.lastChild) {
-			statusNotice.removeChild(statusNotice.lastChild);
-		}
-		const lines = text.split('\n');
-		lines.forEach((line) => {
-			statusNotice.appendChild(document.createTextNode(line));
-			statusNotice.appendChild(document.createElement('br'));
-		});
-	}
-
-	function displayFailureNotice(err) {
-		console.error(err);
-		if (err instanceof Error) {
-			setStatusNotice(err.message);
-		} else if (typeof err === 'string') {
-			setStatusNotice(err);
-		} else {
-			setStatusNotice('An unknown error occurred.');
-		}
-		setStatusMode('notice');
-		initializing = false;
-	}
-
-	const missing = Engine.getMissingFeatures({
-		threads: GODOT_THREADS_ENABLED,
-	});
-
-	if (missing.length !== 0) {
-		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			let serviceWorkerRegistrationPromise;
-			try {
-				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-			}
-			// There's a chance that installing the service worker would fix the issue
-			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
-			});
-		} else {
-			// Display the message as usual
-			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-			displayFailureNotice(missingMsg + missing.join('\n'));
-		}
-	} else {
-		setStatusMode('progress');
-		engine.startGame({
-			'onProgress': function (current, total) {
-				if (current > 0 && total > 0) {
-					statusProgress.value = current;
-					statusProgress.max = total;
-				} else {
-					statusProgress.removeAttribute('value');
-					statusProgress.removeAttribute('max');
-				}
-			},
-		}).then(() => {
-			setStatusMode('hidden');
-		}, displayFailureNotice);
-	}
-}());
-		</script>
-	</body>
+    // If your exported HTML contains engine bootstrap calls (Module/Engine),
+    // keep them as they were. The loader will attach the canvas to the DOM and our resize code handles it.
+  </script>
+</body>
 </html>
 
